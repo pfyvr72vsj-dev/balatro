@@ -314,6 +314,14 @@ import {
   buildDeck, shuffle, cardValue, identifyHand, calcScore,
   BLINDS, JOKER_POOL, aiBestHand, aiBestShopJoker,
 } from './gameLogic.js'
+import {
+  initAudio, setSfxVolume,
+  playPlayCards, playDiscard, playCardSelect,
+  playHandType, playChipTick, playJokerTrigger,
+  playScoreReveal, playScoreCount, playDealCard,
+  playStageClear, playBuy, playButtonClick,
+  playVictory, playDefeat,
+} from './audio.js'
 
 // ---- 设置（localStorage）----
 const defaultSettings = { bgmVolume: 50, sfxVolume: 70, animSpeed: '普通', showFormulaPreview: true }
@@ -328,6 +336,12 @@ function loadSettings() {
 function saveSettings() {
   localStorage.setItem('balatro.settings', JSON.stringify({ ...settings }))
 }
+
+// SFX 音量实时接线：拖滑块时立刻更新 Web Audio master gain
+// BGM 滑块保留可拖动但本轮不接音频（值仍然持久化）
+watch(() => settings.sfxVolume, (val) => {
+  setSfxVolume(val)
+})
 
 const animMult = computed(() => {
   if (settings.animSpeed === '慢') return 1.5
@@ -427,7 +441,10 @@ function initGame() {
   setTimeout(() => dealInitialHand(), 80)
 }
 
-function restartGame() { initGame() }
+function restartGame() {
+  playButtonClick()
+  initGame()
+}
 
 function dealInitialHand() {
   const toDeal = deck.value.splice(0, 8)
@@ -448,6 +465,8 @@ function toggleSelect(card) {
   selectedIds.value = s
   const sel = handCards.value.filter(c => s.has(c.id))
   currentHandTypeName.value = sel.length > 0 ? identifyHand(sel).name : ''
+  // P1: 选牌/取消选牌音效
+  playCardSelect()
 }
 
 // ---- 排序 ----
@@ -455,9 +474,11 @@ const RANK_ORDER = { '2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J'
 const SUIT_ORDER = { '♠':1,'♥':2,'♦':3,'♣':4 }
 
 function sortByRank() {
+  playButtonClick()
   handCards.value = [...handCards.value].sort((a, b) => RANK_ORDER[b.rank] - RANK_ORDER[a.rank])
 }
 function sortBySuit() {
+  playButtonClick()
   handCards.value = [...handCards.value].sort((a, b) => SUIT_ORDER[a.suit] - SUIT_ORDER[b.suit] || RANK_ORDER[b.rank] - RANK_ORDER[a.rank])
 }
 
@@ -469,7 +490,8 @@ async function handlePlay() {
   const sel = handCards.value.filter(c => selectedIds.value.has(c.id))
   const remaining = handCards.value.filter(c => !selectedIds.value.has(c.id))
 
-  // 步骤1：飞牌到出牌区（350ms）
+  // 步骤1：飞牌到出牌区（350ms）— 飞牌动画开始瞬间播出牌音效
+  playPlayCards()
   await animateFlyToPlayArea(sel)
 
   handCards.value = remaining
@@ -478,14 +500,15 @@ async function handlePlay() {
   previewMult.value = 0
   playedCards.value = sel
 
-  // 步骤2：显示牌型名 + 初始 chips/mult
+  // 步骤2：显示牌型名 + 初始 chips/mult — 牌型名出现瞬间播提示音
   const hand = identifyHand(sel)
   currentHandTypeName.value = hand.name
   battleChips.value = hand.chips
   battleMult.value = hand.mult
+  playHandType()
   await sleep(200 * animMult.value)
 
-  // 步骤3：逐张高亮 + chips 累加 + 飞字
+  // 步骤3：逐张高亮 + chips 累加 + 飞字 — 每张高亮起点逐张错峰播 chip_tick
   let runningChips = hand.chips
   for (let i = 0; i < sel.length; i++) {
     highlightedCardIndices.value = [i]
@@ -493,6 +516,7 @@ async function handlePlay() {
     runningChips += val
     battleChips.value = runningChips
     spawnFlyText(`+${val}`, 'chips', i, null)
+    playChipTick()  // 每张高亮时各触发一次，天然错峰（每次 sleep 150ms）
     await sleep(150 * animMult.value)
   }
   highlightedCardIndices.value = []
@@ -507,6 +531,8 @@ async function handlePlay() {
 
     if (deltaChips !== 0 || deltaMult !== 0) {
       highlightedJokerIds.value = [joker.id]
+      // 步骤4：每个 Joker 动画起点触发音效
+      playJokerTrigger()
       if (deltaChips !== 0) {
         battleChips.value = after.chips
         spawnFlyText(`+${deltaChips} 筹码`, 'chips-joker', null, joker.id)
@@ -528,17 +554,19 @@ async function handlePlay() {
   }
   highlightedJokerIds.value = []
 
-  // 步骤5：中央爆出公式大字
+  // 步骤5：中央爆出公式大字 — 大字出现瞬间播爆发冲击音
   const finalScore = runningChips * runningMult
   formulaChips.value = runningChips
   formulaMult.value = runningMult
   formulaScore.value = finalScore
   showFormula.value = true
+  playScoreReveal()
   await sleep(800 * animMult.value)
 
-  // 步骤6：blindScore 插值累加
+  // 步骤6：blindScore 插值累加 — 累加开始瞬间播低频嗡鸣
   const oldScore = blindScore.value
   const newScore = oldScore + finalScore
+  playScoreCount()
   animateScoreCount(oldScore, newScore, 600 * animMult.value)
   await sleep(600 * animMult.value)
   blindScore.value = newScore
@@ -562,6 +590,8 @@ async function handlePlay() {
     return
   }
   if (handsLeft.value <= 0) {
+    // P0: 失败音效（§5.3 playing → lost）
+    playDefeat()
     gameState.value = 'lost'
     isAnimating.value = false
     return
@@ -583,6 +613,8 @@ async function handlePlay() {
 async function handleDiscard() {
   if (selectedIds.value.size === 0 || discardsLeft.value === 0 || isAnimating.value) return
   isAnimating.value = true
+  // P0: 弃牌音效
+  playDiscard()
 
   handCards.value = handCards.value.filter(c => !selectedIds.value.has(c.id))
   selectedIds.value = new Set()
@@ -609,10 +641,14 @@ function enterShopOrWin() {
   // PRD §10.2: 大盲注通关 → won，不进商店
   if (currentBlindIndex.value >= BLINDS.length - 1) {
     coins.value += 5 + handsLeft.value
+    // P0: 通关全部音效（§5.3 playing → won）
+    playVictory()
     gameState.value = 'won'
     return
   }
   coins.value += 5 + handsLeft.value
+  // P0: 通过一关进商店（§5.3 playing → shop）
+  playStageClear()
   openShop()
 }
 
@@ -628,9 +664,13 @@ function buyJoker(sj) {
   coins.value -= sj.price
   ownedJokers.value = [...ownedJokers.value, { ...JOKER_POOL.find(j => j.id === sj.id) }]
   sj.sold = true
+  // P1: 购买 Joker 音效
+  playBuy()
 }
 
 function leaveShop() {
+  // P1: §5.3 shop → playing 通用按钮点击
+  playButtonClick()
   currentBlindIndex.value += 1
   handsLeft.value = 4
   discardsLeft.value = 3
@@ -663,6 +703,7 @@ async function handleAiPlay() {
 }
 
 function aiShopSuggest() {
+  playButtonClick()
   const bestId = aiBestShopJoker(shopJokers.value, ownedJokers.value, coins.value)
   aiHighlightedShopId.value = bestId
 }
@@ -726,6 +767,9 @@ function animateDealCards(cardIds) {
 
     cardIds.forEach((id, i) => {
       setTimeout(() => {
+        // P1: 每张发牌错峰触发音效（与 60ms 动画错峰节奏一致）
+        playDealCard()
+
         const comp = handRefs[id]
         const el = comp?.$el || comp
         if (!el) return
@@ -827,6 +871,16 @@ function sleep(ms) {
 
 onMounted(() => {
   loadSettings()
+  // 把 localStorage 读到的 sfxVolume 同步给 audio 模块
+  setSfxVolume(settings.sfxVolume)
+
+  // 首次用户交互时激活 AudioContext（绕开浏览器 autoplay 策略）
+  function onFirstInteraction() {
+    initAudio()
+    window.removeEventListener('pointerdown', onFirstInteraction)
+  }
+  window.addEventListener('pointerdown', onFirstInteraction)
+
   initGame()
 })
 </script>
