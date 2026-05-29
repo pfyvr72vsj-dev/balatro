@@ -204,9 +204,9 @@
 
         <!-- 牌堆（absolute 内嵌出牌区，PRD §4.4） -->
         <div class="deck-pile" ref="deckPileEl">
-          <div class="deck-layer deck-l3"></div>
-          <div class="deck-layer deck-l2"></div>
-          <div class="deck-layer deck-l1"></div>
+          <div class="deck-layer deck-l3" :style="cardBackStyle"></div>
+          <div class="deck-layer deck-l2" :style="cardBackStyle"></div>
+          <div class="deck-layer deck-l1" :style="cardBackStyle"></div>
           <div class="deck-count">{{ deck.length }}/52</div>
         </div>
       </section>
@@ -334,6 +334,11 @@ const animMult = computed(() => {
   if (settings.animSpeed === '快') return 0.6
   return 1.0
 })
+
+// 卡背图：用 BASE_URL 前缀，兼容本地（./）与 GitHub Pages（/balatro/）
+const cardBackStyle = {
+  backgroundImage: `url(${import.meta.env.BASE_URL}card-back.jpg)`,
+}
 
 // ---- 游戏状态 ----
 const gameState = ref('playing')

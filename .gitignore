@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# 原始素材（实际用 public/card-back.jpg 那份副本）
+卡背.jpg
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
